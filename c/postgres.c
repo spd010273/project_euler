@@ -5,6 +5,10 @@
 #include <math.h>
 #include <string.h>
 
+#include <errno.h>
+#include <sys/time.h>
+#include <sys/types.h>
+
 /*
     Compile with:
 
@@ -74,6 +78,7 @@ int main( int argc, char ** argv )
    
     /* Connect to the database */ 
     PGconn * conn = PQconnectdb( conninfo );
+    free( conninfo );
 
     if( PQstatus( conn ) != CONNECTION_OK )
     {
@@ -93,7 +98,63 @@ int main( int argc, char ** argv )
 
     PGresult * result;
 
-    free( conninfo );
+    result = PQexec( conn, "LISTEN test_notify" );
+
+    if( PQresultStatus( result ) != PGRES_COMMAND_OK )
+    {
+        fprintf(
+            stderr,
+            "LISTEN on channel test_notify failed: %s\n",
+            PQerrorMessage( conn )
+        );
+
+        PQclear( result );
+        PQfinish( conn );
+        return 1;
+    }
+
+    PQclear( result );
+
+    int notify_count = 0;
+    PGnotify * notify = NULL;
+
+    while( notify_count == 0 )
+    {
+        int sock;
+        fd_set input_mask;
+        sock = PQsocket( conn );
+
+        if( sock < 0 )
+        {
+            break;
+        }
+
+        FD_ZERO( &input_mask );
+        FD_SET( sock, &input_mask );
+
+        if( select( sock + 1, &input_mask, NULL, NULL, NULL ) < 0 )
+        {
+            fprintf( stderr, "select() failed: %s\n", strerror( errno ) );
+            PQfinish( conn );
+            return 1;
+        }
+
+        PQconsumeInput( conn );
+
+        while( ( notify = PQnotifies( conn ) ) != NULL )
+        {
+            fprintf(
+               stderr,
+               "ASYNCRONOUS NOTIFY of '%s' received from backend PID %d\n",
+               notify->relname,
+               notify->be_pid
+            );
+
+            PQfreemem( notify );
+            notify_count++;
+        }
+    }
+
     PQfinish( conn );
     return 0;
 }
