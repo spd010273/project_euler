@@ -15,7 +15,7 @@
 gcc this_file.c -I /usr/include/postgresql/ -L /usr/include/postgresql/ -lm -lpq -o this_file 
 */
 
-int main( int argc, char ** argv )
+char * parse_args( int argc, char ** argv )
 {
     /* Parse command line arguments */
     char * conninfo = NULL;
@@ -28,7 +28,7 @@ int main( int argc, char ** argv )
     int c;
 
     opterr = 0;
-
+    
     while( ( c = getopt( argc, argv, "U:p:d:h:" ) ) != -1 )
     {
         switch( c )
@@ -45,27 +45,48 @@ int main( int argc, char ** argv )
             case 'h':
                 hostname = optarg;
                 break;
+            case '?':
+                break;
             default:
-                return 1;
+                printf( "Invalid argument: %c\n", (char) c );
+                return;
         }
     }
-   
+    
+    if( port == NULL )
+    {
+        port = "5432";
+    }
+
+    if( username == NULL )
+    {
+        username = "postgres";
+    }
+
+    if( hostname == NULL )
+    {
+        hostname = "localhost";
+    }
+
+    if( dbname == NULL )
+    {
+        dbname = username;
+    }
+    
     /*
         malloc connection string 
         accounting for
         'username=? host=? port=? dbname=?'
     */
-    conninfo = ( char * ) malloc(
-        sizeof( char ) *
-        (
-            strlen( username ) +
-            strlen( port ) +
-            strlen( dbname ) +
-            strlen( hostname ) +
-            25
-        )
-    );
- 
+    
+    int malloc_size = strlen( username )
+                    + strlen( port )
+                    + strlen( dbname )
+                    + strlen( hostname );
+
+    /* add 26 bytes to account for const strings + null terminator */
+    conninfo = ( char * ) malloc( sizeof( char ) * ( malloc_size + 26 ) );
+    
     /* Assemble the connections string */ 
     strcpy( conninfo, "user=" );
     strcat( conninfo, username );
@@ -75,7 +96,21 @@ int main( int argc, char ** argv )
     strcat( conninfo, port );
     strcat( conninfo, " dbname=" );
     strcat( conninfo, dbname );
-   
+    
+    /* make sure string is null terminated */
+    conninfo[malloc_size + 26] = '\0';
+    
+    return conninfo;
+}
+
+int main( int argc, char ** argv )
+{
+    char * conninfo = parse_args( argc, argv );
+    if( conninfo == NULL )
+    {
+        return 1;
+    }
+    
     /* Connect to the database */ 
     PGconn * conn = PQconnectdb( conninfo );
     free( conninfo );
@@ -90,10 +125,6 @@ int main( int argc, char ** argv )
         
         PQfinish( conn );
         return 1;
-    }
-    else
-    {
-        printf( "Connected to database\n" );
     }
 
     PGresult * result;
